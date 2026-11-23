@@ -1,0 +1,32 @@
+# 監視するサイトの設定です。example.com を自分のサイトに書き換えてください。
+# 書き換えるまで、site-guard は動かずにエラーで止まります。
+
+[general]
+tls_warn_days = 21   # SSL証明書の期限が何日前になったら知らせるか
+
+[[site]]
+name = "My Shop"                       # 通知に出る名前（自由）
+base_url = "https://example.com"       # 自分のサイトのURL
+watch_pages = ["/"]                    # スクリプトを見張るページ
+payment_pages = []                     # 決済ページ。WooCommerceなら ["/checkout/"]
+
+# WooCommerceの決済ページは、カートが空だと表示されません。
+# "auto" にすると、在庫のある商品を使い捨てのカートに入れて表示します（注文はしません）。
+# ドメインの所有者確認が済むまでは、カートには入れません。
+# checkout_product_id = "auto"
+
+# 対応済み・対応予定の項目。週次まとめで「対策済み・計画どおり」に分けて表示します。
+# until を書くと、その日を過ぎたら「対応が必要」に戻ります。
+# [site.acknowledged."mail:dmarc-none"]
+# note = "正規メールの届き方を観察中。来月 quarantine に切り替える予定"
+# until = 2027-01-15
+
+# 外からは確認できないガイドライン項目について、自分で申告する内容（月次レポートに表示）。
+# 文字列 = 対応済み（内容を表示） / false = 未対応 / "一部: ..." / "対象外: ..."。
+# 分からない項目は書かないでください。レポートでは「要確認」と表示します。
+# [site.declared]
+# admin_access_restriction = "管理画面にBasic認証を追加"
+# login_lockout = "同じアカウントで10回失敗すると30分ロック"
+# upload_restriction = "uploads 配下のPHP実行を禁止"
+# custom_code_review = "2026-12-01 自作テーマのコードを確認"
+# card_testing = "Stripe Radar で高リスク取引をブロック"

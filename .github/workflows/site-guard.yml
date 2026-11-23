@@ -1,0 +1,75 @@
+name: site-guard
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"   # every 3 hours (UTC)
+    - cron: "0 0 * * 1"      # Monday 09:00 JST: weekly digest of all open findings
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "run / all / accept / test-notify"
+        default: run
+
+permissions:
+  contents: write  # commit the baseline state back to this repo
+
+concurrency:
+  group: site-guard
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+    steps:
+      # The baseline committed below lists your server IP and open weaknesses.
+      # Never let that land in a public repository.
+      - name: Refuse to run in a public repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          private=$(gh api "repos/$GITHUB_REPOSITORY" --jq .private)
+          if [ "$private" != "true" ]; then
+            echo "::error::このリポジトリは公開（Public）になっています。点検結果に弱点の情報が含まれるため、Settings → General → Danger Zone で Private に変更してから実行してください。"
+            exit 2
+          fi
+
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: Run checks
+        run: |
+          MODE="${{ github.event.inputs.mode || 'run' }}"
+          if [ "${{ github.event.schedule }}" = "0 0 * * 1" ]; then MODE=all; fi
+          case "$MODE" in
+            all)         ARGS="run --all" ;;
+            accept)      ARGS="accept" ;;
+            test-notify) ARGS="test-notify" ;;
+            *)           ARGS="run" ;;
+          esac
+          set +e
+          python -m site_guard $ARGS
+          ec=$?
+          # exit 1 = critical finding (already notified); anything else is a crash.
+          [ $ec -le 1 ] || exit $ec
+
+      - name: Save baseline
+        run: |
+          git config user.name "site-guard"
+          git config user.email "site-guard@users.noreply.github.com"
+          git add data/state
+          git diff --cached --quiet || git commit -m "state: $(date -u +%FT%TZ)" && git push
+
+      - name: Alert if the monitor itself broke
+        if: failure()
+        run: |
+          [ -n "$DISCORD_WEBHOOK_URL" ] || exit 0
+          curl -sS -H "Content-Type: application/json" \
+            -d "{\"username\":\"Site Guard\",\"content\":\"⚠️ Site Guard の定期実行が失敗しました: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}\"}" \
+            "$DISCORD_WEBHOOK_URL"
