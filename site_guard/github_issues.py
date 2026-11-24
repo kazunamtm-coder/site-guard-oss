@@ -1,7 +1,7 @@
 """Notify through GitHub Issues: zero setup, and GitHub emails the owner.
 
 Each open problem gets one issue; when the problem disappears on a later run,
-its issue is closed with a short comment. GitHub sends the repository owner an
+its issue is closed (quietly: no comment). GitHub sends the repository owner an
 email for every new issue (and the GitHub mobile app shows it), so owners who
 don't use Discord still hear about problems without configuring anything.
 
@@ -76,8 +76,11 @@ class GitHub:
         r.raise_for_status()
         return r.json()
 
-    def close(self, number: int, comment: str) -> None:
-        self.s.post(self._url(f"/issues/{number}/comments"), json={"body": comment}, timeout=20).raise_for_status()
+    def close(self, number: int, comment: str | None = None) -> None:
+        # No comment by default: a comment is one more email to the owner,
+        # and GitHub already emails "Closed as completed".
+        if comment:
+            self.s.post(self._url(f"/issues/{number}/comments"), json={"body": comment}, timeout=20).raise_for_status()
         self.s.patch(self._url(f"/issues/{number}"), json={"state": "closed", "state_reason": "completed"}, timeout=20).raise_for_status()
 
 
@@ -128,7 +131,6 @@ def sync(gh: GitHub, site: str, findings: list[Finding], issued: set[str],
             by_key[m.group(1).split("|", 1)[1]] = i
 
     want = {f.key: f for f in actionable(findings)}
-    acked = {f.key: f for f in findings if f.acknowledged}
     opened = closed = 0
     for key, f in sorted(want.items(), key=lambda kv: SEVERITY_ORDER.get(kv[1].severity, 9)):
         if key in by_key or key in issued:
@@ -139,11 +141,8 @@ def sync(gh: GitHub, site: str, findings: list[Finding], issued: set[str],
     for key, issue in by_key.items():
         if key in want:
             continue
-        if key in acked:
-            comment = f"✅ 対応済み・対応予定として登録されたため閉じます。\n> {acked[key].ack_note}"
-        else:
-            comment = "✅ 最新の点検でこの項目は見つかりませんでした。解消したため閉じます。"
-        gh.close(issue["number"], comment)
+        # Resolved, or registered as handled/scheduled in config: close quietly.
+        gh.close(issue["number"])
         closed += 1
     return set(want), opened, closed
 
@@ -153,19 +152,18 @@ def post_digest(gh: GitHub, site: str, findings: list[Finding]) -> None:
     today = datetime.now(JST).strftime("%Y-%m-%d")
     for old in gh.open_issues(DIGEST_LABEL):
         if old.get("title", "").endswith(f"— {site}"):
-            gh.close(old["number"], "新しい週次まとめを作成したため閉じます。")
+            gh.close(old["number"])
     body = "\n\n".join(status_report(site, findings))
     body = f"@{gh.owner}\n\n{body}\n\n---\n{marker(site, 'digest')}"
     gh.create(f"📋 週次まとめ {today} — {site}", body, [DIGEST_LABEL])
 
 
 def test_notice(gh: GitHub) -> dict:
-    issue = gh.create(
+    """One email only: the issue stays open for the owner to close."""
+    return gh.create(
         "✅ site-guard: テスト通知",
-        f"@{gh.owner} このIssueの通知メールが届いていれば、設定は完了です。\n\n"
+        f"@{gh.owner} このメールが届いていれば、設定は完了です。このIssueは閉じて構いません。\n\n"
         "届かない場合は、GitHub の Settings → Notifications で、メール通知が有効になっているか、"
         "このリポジトリを Watch しているかを確認してください。迷惑メールフォルダも確認してください。",
         [LABEL],
     )
-    gh.close(issue["number"], "テスト通知のため、自動で閉じました。")
-    return issue

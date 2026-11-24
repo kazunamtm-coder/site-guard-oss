@@ -251,7 +251,7 @@ class _FakeGH:
         self.created.append({"number": n, "title": title, "body": body, "labels": labels})
         return {"number": n}
 
-    def close(self, number, comment):
+    def close(self, number, comment=None):
         self.closed.append((number, comment))
 
 
@@ -299,7 +299,7 @@ def test_info_and_acknowledged_items_get_no_issue_and_ack_closes():
     gh = _FakeGH([{"number": 9, "body": gi.marker("Shop", "headers:x")}])
     items = [_f("headers:csp-report-only", sev="info"), _f("headers:x", ack="来月対応予定")]
     _, opened, closed = gi.sync(gh, "Shop", items, {"headers:x"}, gh.open_issues())
-    assert opened == 0 and closed == 1 and "来月対応予定" in gh.closed[0][1]
+    assert opened == 0 and closed == 1
 
 
 def test_other_sites_issues_are_left_alone():
@@ -329,3 +329,15 @@ def test_runner_state_save_keeps_issued_issues(tmp_path, monkeypatch):
     prev = st.load("Shop")
     st.save("Shop", {**prev, "scripts": {"x": {}}})
     assert st.load("Shop")["issued_issues"] == ["a"]
+
+
+def test_closing_sends_no_extra_comment():
+    gh = _FakeGH([{"number": 7, "body": gi.marker("Shop", "mail:dmarc-none")}])
+    gi.sync(gh, "Shop", [], {"mail:dmarc-none"}, gh.open_issues())
+    assert gh.closed == [(7, None)]
+
+
+def test_test_notice_is_one_email_and_stays_open():
+    gh = _FakeGH()
+    gi.test_notice(gh)
+    assert len(gh.created) == 1 and gh.closed == []
