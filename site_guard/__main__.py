@@ -101,7 +101,8 @@ def make_reports(settings, args) -> int:
         rows = evaluate(findings, server, site.declared, has_payment_page=bool(site.payment_pages),
                         intrusive_ran=verified)
         last = state_store.load(site.name).get("last_run")
-        path = outdir / f"{month}-{re.sub(r'\W+', '_', site.name)}.html"
+        slug = re.sub(r"\W+", "_", site.name)
+        path = outdir / f"{month}-{slug}.html"
         path.write_text(render(site, rows, findings, server, month, last))
         print(f"{site.name}: {path}")
         for row in rows:
