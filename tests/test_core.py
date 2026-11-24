@@ -228,3 +228,103 @@ def test_placeholder_config_is_refused(tmp_path):
     cfg.write_text('[[site]]\nname = "x"\nbase_url = "https://example.com"\n')
     with pytest.raises(SystemExit):
         load_settings(cfg)
+
+
+# --- GitHub Issue notifications -------------------------------------------
+
+from site_guard import github_issues as gi
+
+
+class _FakeGH:
+    owner = "shop-owner"
+
+    def __init__(self, issues=None):
+        self.issues = list(issues or [])
+        self.created, self.closed = [], []
+
+    def open_issues(self, label=gi.LABEL):
+        return [i for i in self.issues if label in i.get("labels", [gi.LABEL])]
+
+    def create(self, title, body, labels):
+        n = 100 + len(self.created)
+        self.created.append({"number": n, "title": title, "body": body, "labels": labels})
+        return {"number": n}
+
+    def close(self, number, comment):
+        self.closed.append((number, comment))
+
+
+def _f(key, sev="medium", ack=""):
+    f = Finding("Shop", "mail", sev, f"title {key}", key=key)
+    f.ack_note = ack
+    return f
+
+
+def test_new_problem_opens_one_issue_with_marker_and_mention():
+    gh = _FakeGH()
+    issued, opened, closed = gi.sync(gh, "Shop", [_f("mail:dmarc-none")], set(), gh.open_issues())
+    assert (opened, closed) == (1, 0)
+    body = gh.created[0]["body"]
+    assert "@shop-owner" in body and gi.marker("Shop", "mail:dmarc-none") in body
+    assert issued == {"mail:dmarc-none"}
+
+
+def test_existing_open_issue_is_not_duplicated():
+    gh = _FakeGH([{"number": 7, "body": gi.marker("Shop", "mail:dmarc-none")}])
+    _, opened, closed = gi.sync(gh, "Shop", [_f("mail:dmarc-none")], {"mail:dmarc-none"}, gh.open_issues())
+    assert (opened, closed) == (0, 0)
+
+
+def test_resolved_problem_closes_its_issue():
+    gh = _FakeGH([{"number": 7, "body": gi.marker("Shop", "mail:dmarc-none")}])
+    issued, opened, closed = gi.sync(gh, "Shop", [], {"mail:dmarc-none"}, gh.open_issues())
+    assert closed == 1 and gh.closed[0][0] == 7 and issued == set()
+
+
+def test_issue_closed_by_owner_is_not_reopened_every_run():
+    gh = _FakeGH([])  # owner closed it; problem remains
+    _, opened, _ = gi.sync(gh, "Shop", [_f("mail:dmarc-none")], {"mail:dmarc-none"}, gh.open_issues())
+    assert opened == 0
+
+
+def test_problem_that_returns_after_fix_opens_again():
+    gh = _FakeGH([])
+    issued, _, _ = gi.sync(gh, "Shop", [], {"mail:dmarc-none"}, [])
+    _, opened, _ = gi.sync(gh, "Shop", [_f("mail:dmarc-none")], issued, [])
+    assert opened == 1
+
+
+def test_info_and_acknowledged_items_get_no_issue_and_ack_closes():
+    gh = _FakeGH([{"number": 9, "body": gi.marker("Shop", "headers:x")}])
+    items = [_f("headers:csp-report-only", sev="info"), _f("headers:x", ack="来月対応予定")]
+    _, opened, closed = gi.sync(gh, "Shop", items, {"headers:x"}, gh.open_issues())
+    assert opened == 0 and closed == 1 and "来月対応予定" in gh.closed[0][1]
+
+
+def test_other_sites_issues_are_left_alone():
+    gh = _FakeGH([{"number": 5, "body": gi.marker("Other", "mail:dmarc-none")}])
+    _, _, closed = gi.sync(gh, "Shop", [], set(), gh.open_issues())
+    assert closed == 0
+
+
+def test_critical_findings_are_labelled_urgent():
+    gh = _FakeGH()
+    gi.sync(gh, "Shop", [_f("scripts:diff:/checkout/:abc", sev="critical")], set(), [])
+    assert gi.URGENT_LABEL in gh.created[0]["labels"]
+
+
+def test_issues_channel_can_be_turned_off(monkeypatch):
+    monkeypatch.setenv("GITHUB_TOKEN", "x")
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    assert gi.available()
+    monkeypatch.setenv("SITE_GUARD_ISSUES", "off")
+    assert not gi.available()
+
+
+def test_runner_state_save_keeps_issued_issues(tmp_path, monkeypatch):
+    from site_guard import state as st
+    monkeypatch.setattr(st, "STATE_DIR", tmp_path)
+    st.save("Shop", {"issued_issues": ["a"], "scripts": {}})
+    prev = st.load("Shop")
+    st.save("Shop", {**prev, "scripts": {"x": {}}})
+    assert st.load("Shop")["issued_issues"] == ["a"]

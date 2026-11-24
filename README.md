@@ -1,7 +1,7 @@
 # site-guard
 
 中小のネットショップが、**ウイルス対策ソフトでは防げない攻撃**を自分で見張るための道具です。
-GitHub Actions で3時間ごとに自分のサイトを外から点検し、異常があれば Discord に日本語で知らせます。通知には「何をすればいいか」まで書きます。
+GitHub Actions で3時間ごとに自分のサイトを外から点検し、異常があれば**メールで**日本語で知らせます。通知には「何をすればいいか」まで書きます。
 
 サーバーを用意する必要はありません。費用もかかりません（非公開リポジトリの GitHub Actions 無料枠で動きます）。
 
@@ -34,25 +34,31 @@ GitHub Actions で3時間ごとに自分のサイトを外から点検し、異�
 
 所有者確認は DNS の TXT レコードで行います。ドメインの DNS を編集できる人しか追加できないので、他人のサイトを設定ファイルに書いても、誰でも見える範囲の点検しか動きません。所有者確認が済んでいない間に行うのは、普通の訪問者のブラウザと同じ読み込みだけです。
 
-## 使い始める（約15分）
+## 使い始める（約10分）
 
 1. **このリポジトリを自分のアカウントにコピーします。** 右上の「Use this template」→「Create a new repository」。
    **必ず Private（非公開）を選んでください。** 点検結果にはサーバーのIPアドレスや、まだ直していない弱点が含まれます。公開リポジトリでは点検が動かないようにしてあります。
-2. **Discord の通知先を作ります。** Discord のサーバー設定 → 連携サービス → ウェブフック → 新しいウェブフック → URLをコピー。
-3. **通知先を登録します。** コピーしたリポジトリの Settings → Secrets and variables → Actions → New repository secret。名前は `DISCORD_WEBHOOK_URL`、値は2のURL。
-4. **監視するサイトを書きます。** `config/sites.toml` を開き、`https://example.com` を自分のサイトのURLに書き換えます。WooCommerce なら `payment_pages = ["/checkout/"]` と `checkout_product_id = "auto"` も設定します。
-5. **所有者確認をします。** 手元で次を実行するか、Actions を一度動かすと、追加すべき TXT レコードが表示されます。
-   ```bash
-   python -m site_guard diagnose https://自分のドメイン
-   ```
-   表示されたホスト名（`_site-guard.自分のドメイン`）と値を、ドメインの DNS 設定に追加してください。
-6. **動作を確認します。** Actions → site-guard → Run workflow で `mode` に `test-notify` を入れて実行し、Discord に通知が届けば完了です。
+2. **監視するサイトを書きます。** コピーしたリポジトリで `config/sites.toml` を開き、鉛筆マークで編集します。`https://example.com` を自分のサイトのURLに書き換えて保存します。WooCommerce なら `payment_pages = ["/checkout/"]` と `checkout_product_id = "auto"` も設定します（ファイル内に説明があります）。
+3. **通知が届くか確かめます。** Actions タブ → site-guard → 「Run workflow」で、`mode` に `test-notify` と入れて実行します。GitHub に登録しているメールアドレスに「テスト通知」のメールが届けば完了です。
+4. **所有者確認をします。** もう一度「Run workflow」を（`mode` は `run` のまま）実行すると、「所有者確認がまだです」というメールが届きます。そこに書かれた TXT レコードを、ドメインの DNS 設定（お名前.com など）に追加してください。これで、流出ファイルや決済ページの点検まで行えるようになります。
 
-以後は3時間ごとに自動で点検します。毎週月曜の朝9時には、未解決の項目すべての週次まとめが届きます。
+以後は3時間ごとに自動で点検します。毎週月曜の朝9時には、週次まとめのメールが届きます。
+
+### 通知のしくみ
+
+問題を見つけると、リポジトリに **Issue（課題）** を1件ずつ立てます。GitHub が、そのたびに登録メールアドレスへ通知メールを送ります。GitHub のスマホアプリでも見られます。
+
+- 問題が解消すると、次回の点検で Issue は自動で閉じます。開いている Issue が、そのまま「未解決の一覧」になります
+- 緊急度の高いもの（決済ページのスクリプト変化など）には「緊急」ラベルが付きます
+- 監視そのものが失敗したときも、GitHub から「workflow run failed」のメールが届きます
+
+**メールが届かないときは：** GitHub の Settings → Notifications で「Email」が有効か、このリポジトリを Watch しているかを確認してください。迷惑メールフォルダも確認してください。
+
+**Discord でも受け取りたい場合：** Discord のサーバー設定 → 連携サービス → ウェブフック で URL を作り、リポジトリの Settings → Secrets and variables → Actions に `DISCORD_WEBHOOK_URL` という名前で登録します。Issue と Discord の両方に届きます。Discord だけにしたい場合は、同じ画面の「Variables」タブで `SITE_GUARD_ISSUES` という名前、値 `off` を登録してください。
 
 ## 警報が出たら
 
-通知に「対処」と、重大なものには [RUNBOOK.md](RUNBOOK.md) へのリンクが付きます。手順の原則は **止める → 証拠を残す → 原因を消す → 鍵を替える → 報告する** です。
+通知（Issue）に「対処」と [RUNBOOK.md](RUNBOOK.md) へのリンクが付きます。手順の原則は **止める → 証拠を残す → 原因を消す → 鍵を替える → 報告する** です。
 
 自分でプラグインやテーマを更新した直後にスクリプトの変化が通知された場合は、Actions で `mode` に `accept` を入れて実行すると、今の状態を正しいものとして承認します。承認するまで、同じ警報が出続けます（見落とし防止のため）。
 
@@ -60,10 +66,10 @@ GitHub Actions で3時間ごとに自分のサイトを外から点検し、異�
 
 ```bash
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp .env.example .env                                  # DISCORD_WEBHOOK_URL を書く
+cp .env.example .env                                  # 手元で通知したいときは DISCORD_WEBHOOK_URL を書く
 .venv/bin/python -m site_guard diagnose https://example.com   # 1回限りの診断（設定ファイル不要）
 .venv/bin/python -m site_guard run --dry-run          # 画面に表示するだけ
-.venv/bin/python -m site_guard run                    # 新しい問題を Discord に送る
+.venv/bin/python -m site_guard run                    # 新しい問題を通知する（手元では Discord のみ）
 .venv/bin/python -m site_guard run --all              # 未解決をすべて送る（週次まとめ）
 .venv/bin/python -m site_guard accept                 # 今のスクリプト・DNSを承認
 .venv/bin/python -m site_guard report                 # 月次のガイドライン対応レポート（reports/ にHTML）

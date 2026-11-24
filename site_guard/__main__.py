@@ -1,6 +1,6 @@
 """site-guard CLI.
 
-  python -m site_guard run            # check all sites, notify Discord about NEW findings
+  python -m site_guard run            # check all sites; notify via GitHub Issues (in Actions) and/or Discord
   python -m site_guard run --all      # notify every open finding (weekly digest)
   python -m site_guard run --dry-run  # print only, no Discord
   python -m site_guard accept         # accept current scripts/DNS as the new baseline
@@ -13,6 +13,8 @@ from __future__ import annotations
 import argparse
 import sys
 
+from . import github_issues
+from . import state as state_store
 from .config import load_settings
 from .models import SEVERITY_EMOJI
 from .notify import send_discord, send_resolved, send_status_report, status_report
@@ -31,11 +33,17 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = load_settings(require_sites=args.command not in ("diagnose", "test-notify"))
     if args.command == "test-notify":
-        if not settings.discord_webhook_url:
-            print("DISCORD_WEBHOOK_URL が設定されていません", file=sys.stderr)
+        sent = []
+        if settings.discord_webhook_url:
+            send_discord(settings.discord_webhook_url, [], "✅ Site Guard: テスト通知です。この通知が見えれば設定は完了です。")
+            sent.append("Discord")
+        if github_issues.available():
+            issue = github_issues.test_notice(github_issues.GitHub())
+            sent.append(f"GitHub Issue #{issue['number']}（登録メールアドレスに通知されます）")
+        if not sent:
+            print("通知先がありません。GitHub Actions で実行するか、DISCORD_WEBHOOK_URL を設定してください。", file=sys.stderr)
             return 2
-        send_discord(settings.discord_webhook_url, [], "✅ Site Guard: テスト通知です。この通知が見えれば設定は完了です。")
-        print("送信しました")
+        print("送信しました: " + " / ".join(sent))
         return 0
     if args.command == "diagnose":
         if not args.target:
@@ -50,6 +58,16 @@ def main(argv: list[str] | None = None) -> int:
     if not sites:
         print("該当するサイトがありません", file=sys.stderr)
         return 2
+
+    gh, gh_issues, exit_code = None, None, 0
+    if github_issues.available() and not args.dry_run:
+        try:
+            gh = github_issues.GitHub()
+            gh.ensure_labels()
+            gh_issues = gh.open_issues()
+        except Exception as e:  # noqa: BLE001 - checks still run; the workflow fails so GitHub emails the owner
+            print(f"GitHub Issue での通知を準備できませんでした: {e}", file=sys.stderr)
+            gh, exit_code = None, 3
 
     worst = 0
     for site in sites:
@@ -75,9 +93,22 @@ def main(argv: list[str] | None = None) -> int:
                          f"🛡️ Site Guard: **{site.name}** — 新しく見つかった項目 {len(report)} 件")
         if resolved and not args.all and settings.discord_webhook_url and not args.dry_run:
             send_resolved(settings.discord_webhook_url, site.name, resolved)
+        if gh is not None:
+            try:
+                st = state_store.load(site.name)
+                issued, opened, closed = github_issues.sync(
+                    gh, site.name, findings, set(st.get("issued_issues", [])), gh_issues)
+                st["issued_issues"] = sorted(issued)
+                state_store.save(site.name, st)
+                print(f"   GitHub Issue: 新規 {opened} 件 / 解消して閉じた {closed} 件")
+                if args.all:
+                    github_issues.post_digest(gh, site.name, findings)
+            except Exception as e:  # noqa: BLE001
+                print(f"GitHub Issue での通知に失敗しました: {e}", file=sys.stderr)
+                exit_code = 3
         if any(f.severity == "critical" for f in findings):
             worst = 1
-    return worst
+    return exit_code or worst
 
 
 def make_reports(settings, args) -> int:

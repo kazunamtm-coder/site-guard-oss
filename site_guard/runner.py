@@ -75,6 +75,7 @@ def run_site(settings: Settings, site: Site, accept: bool = False, persist: bool
 
     if persist:
         state_store.save(site.name, {
+            **prev,  # keep keys owned by other parts (e.g. issued_issues)
             "scripts": merge(base_scripts, script_now),
             "dns": merge(base_dns, dns_now),
             "open_findings": sorted(now_keys),
