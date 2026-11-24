@@ -424,3 +424,13 @@ def test_issue_keeps_technical_part_for_forwarding():
     f = Finding("S", "mail", "high", "SPFレコードがありません", fix="v=spf1 -all", key="mail:spf")
     body = issue_body(f, "o")
     assert "制作会社・技術者の方へ" in body and "v=spf1 -all" in body and "放っておくと" in body
+
+
+def test_unverified_report_says_payment_page_was_not_checked_right_under_verdict():
+    from site_guard.diagnose import NOT_VERIFIED_WARNING, Diagnosis, to_text
+    f = Finding("S", "mail", "medium", "観察モード", key="mail:dmarc-none")
+    text = to_text(Diagnosis("shop.example", "shop.example", ["WordPress"], True, False, "", [], [f]))
+    head = text.split("## ")[0]          # everything before the first item
+    assert NOT_VERIFIED_WARNING in head
+    ok = to_text(Diagnosis("shop.example", "shop.example", ["WordPress"], True, True, "", [], [f]))
+    assert NOT_VERIFIED_WARNING not in ok

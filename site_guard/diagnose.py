@@ -83,6 +83,10 @@ RESPONSIBILITY = {
 }
 
 
+NOT_VERIFIED_WARNING = ("あなたの許可を得ていないので、一番大事な支払いページの中身は、まだ点検していません。"
+                        "⚠️ 持ち主の確認をすると点検できます")
+
+
 def to_text(d: Diagnosis) -> str:
     todo = [f for f in d.findings if f.severity != "info"]
     todo.sort(key=lambda f: (explain(f).level, SEVERITY_ORDER.get(f.severity, 9)))
@@ -95,11 +99,10 @@ def to_text(d: Diagnosis) -> str:
         verdict = "🟢 急いで直すことはありません。時間があるときに見直せることが、いくつかあります。"
     else:
         verdict = "🟢 外から確認できる範囲では、問題は見つかりませんでした。"
-    lines = [
-        f"# {d.domain} の診断結果",
-        "",
-        verdict,
-        "",
+    lines = [f"# {d.domain} の診断結果", "", verdict, ""]
+    if not d.verified:
+        lines += [NOT_VERIFIED_WARNING + "（やり方は、このレポートの一番下に書いてあります）", ""]
+    lines += [
         f"- 使っているサービス：{', '.join(d.platforms) or '不明'}",
         f"- だれが守る？：{RESPONSIBILITY[d.self_hosted]}",
         f"- 点検したはんい：{'くわしい点検まで（持ち主の確認ずみ）' if d.verified else 'だれでも見られる範囲だけ'}",
