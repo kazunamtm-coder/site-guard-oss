@@ -42,5 +42,8 @@ def is_verified(domain: str) -> tuple[bool, str]:
 
 def instructions(domain: str) -> str:
     d = domain.removeprefix("www.")
-    return (f"DNSにTXTレコードを追加してください: ホスト名 `_site-guard.{d}` / 値 `{verify_token(d)}`\n"
-            "追加後、反映まで数分〜1時間ほどかかることがあります。")
+    return ("ドメイン（お店のアドレス）を買った会社の管理画面で、「DNS」や「ドメイン設定」という画面を開き、"
+            "次の1行を追加してください。\n"
+            f"　・種類：TXT\n　・名前（ホスト名）：_site-guard（「_site-guard.{d}」と入れる画面もあります）\n"
+            f"　・値（内容）：{verify_token(d)}\n"
+            "追加してから反映されるまで、数分〜1時間ほどかかります。")

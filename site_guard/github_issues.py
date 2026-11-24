@@ -16,7 +16,8 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
-from .models import SEVERITY_EMOJI, SEVERITY_ORDER, Finding
+from .explain import explain, tech_block
+from .models import SEVERITY_ORDER, Finding
 from .notify import runbook_url, status_report
 
 LABEL = "site-guard"
@@ -89,22 +90,25 @@ def marker(site: str, key: str) -> str:
 
 
 def issue_title(f: Finding) -> str:
-    return f"{SEVERITY_EMOJI.get(f.severity, '')} [{f.site}] {f.title}"
+    p = explain(f)
+    return f"{p.icon} {p.label}｜{f.site}：{p.headline}"
 
 
 def issue_body(f: Finding, owner: str) -> str:
-    parts = [f"@{owner} site-guard が新しい項目を見つけました。", "",
-             f"- サイト: {f.site}", f"- 重要度: {f.severity}", ""]
-    if f.detail:
-        parts += ["### 内容", "```", f.detail[:3000], "```", ""]
-    if f.fix:
-        parts += ["### 対処", f.fix, ""]
+    p = explain(f)
+    parts = [f"@{owner}", "",
+             f"## {p.icon} {p.label}：{p.headline}", "",
+             "**何が起きているか**", p.what, "",
+             "**放っておくと**", p.risk, "",
+             "**あなたがやること**"]
+    parts += [f"{i}. {t}" for i, t in enumerate(p.todo, 1)]
+    parts += ["", "<details><summary>制作会社・技術者の方へ（この部分をそのまま転送できます）</summary>", "",
+              "```", tech_block(f)[:3000], "```"]
     link = runbook_url(f.check)
     if link:
-        parts += [f"📖 対応手順: {link}", ""]
-    parts += ["---",
-              "この項目が解消すると、次回の点検（3時間ごと）でこのIssueは自動で閉じます。"
-              "自分で閉じた場合は、問題が一度解消してから再発するまで、同じIssueは立ちません。",
+        parts.append(f"📖 対応手順: {link}")
+    parts += ["", "</details>", "", "---",
+              "この問題が直ると、次の点検（3時間ごと）で、このお知らせは自動で閉じます。",
               marker(f.site, f.key)]
     return "\n".join(parts)
 
@@ -135,7 +139,7 @@ def sync(gh: GitHub, site: str, findings: list[Finding], issued: set[str],
     for key, f in sorted(want.items(), key=lambda kv: SEVERITY_ORDER.get(kv[1].severity, 9)):
         if key in by_key or key in issued:
             continue
-        labels = [LABEL] + ([URGENT_LABEL] if f.severity in ("critical", "high") else [])
+        labels = [LABEL] + ([URGENT_LABEL] if explain(f).level == 0 else [])
         gh.create(issue_title(f), issue_body(f, gh.owner), labels)
         opened += 1
     for key, issue in by_key.items():
@@ -155,7 +159,7 @@ def post_digest(gh: GitHub, site: str, findings: list[Finding]) -> None:
             gh.close(old["number"])
     body = "\n\n".join(status_report(site, findings))
     body = f"@{gh.owner}\n\n{body}\n\n---\n{marker(site, 'digest')}"
-    gh.create(f"📋 週次まとめ {today} — {site}", body, [DIGEST_LABEL])
+    gh.create(f"📋 今週のまとめ {today} — {site}", body, [DIGEST_LABEL])
 
 
 def test_notice(gh: GitHub) -> dict:

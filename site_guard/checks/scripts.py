@@ -148,7 +148,8 @@ def collect(session: requests.Session, site: Site, allow_cart: bool = False) -> 
         try:
             _prepare_checkout(session, site)
         except requests.RequestException as e:
-            findings.append(Finding(site.name, "scripts", "medium", "テスト用カートを作れませんでした", str(e)))
+            findings.append(Finding(site.name, "scripts", "medium", "テスト用カートを作れませんでした", str(e),
+                                    key="scripts:cart-failed"))
     for path in pages:
         url = urljoin(site.base_url, path)
         try:

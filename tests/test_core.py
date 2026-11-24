@@ -102,9 +102,9 @@ def test_status_report_separates_handled_from_action_items():
     calm = "\n".join(status_report("S", [handled]))
     assert calm.startswith("🟢") and "保護済み" in calm
     alarm = "\n".join(status_report("S", [handled, open_]))
-    assert alarm.startswith("🔴") and "1 件" in alarm
+    assert alarm.startswith("🟠") and "1 件" in alarm and "放っておくと" in alarm
     expired = Finding("S", "mail", "medium", "DMARC", key="mail:dmarc-none", ack_note="12月に強化予定", ack_expired=True)
-    assert "予定日を過ぎました" in "\n".join(status_report("S", [expired]))
+    assert "予定日を過ぎています" in "\n".join(status_report("S", [expired]))
 
 
 def test_platform_detection():
@@ -341,3 +341,86 @@ def test_test_notice_is_one_email_and_stays_open():
     gh = _FakeGH()
     gi.test_notice(gh)
     assert len(gh.created) == 1 and gh.closed == []
+
+
+# --- plain language for shop owners ----------------------------------------
+
+import re
+
+from site_guard import explain as ex
+
+# One example of every kind of finding the owner can receive.
+ALL_KINDS = [
+    Finding("S", "mail", "high", "SPFレコードがありません", key="mail:spf"),
+    Finding("S", "mail", "critical", "SPFが +all", key="mail:spf"),
+    Finding("S", "mail", "high", "DMARCレコードがありません", key="mail:dmarc"),
+    Finding("S", "mail", "medium", "観察モード", key="mail:dmarc-none"),
+    Finding("S", "mail", "medium", "DNSを照会できませんでした", key="dns:lookup-failed"),
+    Finding("S", "dns", "critical", "DNSのAレコードが変わりました", key="dns:A:1.2.3.4"),
+    Finding("S", "dns", "critical", "DNSのNSレコードが変わりました", key="dns:NS:ns.example."),
+    Finding("S", "dns", "high", "DNSのAAAAレコードが変わりました", key="dns:AAAA:"),
+    Finding("S", "dns", "high", "DNSのMXレコードが変わりました", key="dns:MX:10 mx.example."),
+    Finding("S", "scripts", "critical", "/checkout/ のスクリプトが変化しました", key="scripts:diff:/checkout/:ab"),
+    Finding("S", "scripts", "high", "/ のスクリプトが変化しました", key="scripts:diff:/:ab"),
+    Finding("S", "scripts", "low", "減りました", key="scripts:removed:/:ab"),
+    Finding("S", "scripts", "high", "/cart/ を取得できません", key="scripts:fetch:/cart/"),
+    Finding("S", "scripts", "high", "/cart/ が HTTP 500", key="scripts:status:/cart/"),
+    Finding("S", "scripts", "medium", "転送されました", key="scripts:redirect:/checkout/"),
+    Finding("S", "scripts", "medium", "テスト用カートを作れませんでした", key="scripts:cart-failed"),
+    Finding("S", "tls", "critical", "SSL証明書の検証に失敗しました", key="tls:verify-failed"),
+    Finding("S", "tls", "critical", "SSL証明書の期限が切れています", key="tls:expired"),
+    Finding("S", "tls", "high", "SSL証明書の期限まで残り5日", key="tls:expiring"),
+    Finding("S", "tls", "high", "HTTPS(443)に接続できません", key="tls:unreachable"),
+    Finding("S", "http", "high", "サイトに接続できません", key="http:unreachable"),
+    Finding("S", "wordpress", "critical", "/.env が外部から読めます", key="wordpress:exposed:/.env"),
+    Finding("S", "wordpress", "medium", "REST APIからユーザー名が2件見えます", key="wordpress:users-endpoint"),
+    Finding("S", "wordpress", "medium", "xmlrpc.php が有効です", key="wordpress:xmlrpc"),
+    Finding("S", "wordpress", "low", "ログイン画面", key="wordpress:login-open"),
+    Finding("S", "wordpress", "low", "readme.html が公開されています", key="wordpress:readme"),
+    Finding("S", "wordpress", "low", "WordPressのバージョン(6.9)が公開されています", key="wordpress:generator"),
+    Finding("S", "headers", "medium", "セキュリティヘッダー不足: 3件", key="headers:missing:a,b,c"),
+    Finding("S", "headers", "low", "セキュリティヘッダー不足: 1件", key="headers:missing"),
+    Finding("S", "headers", "info", "CSPは報告モード", key="headers:csp-report-only"),
+    Finding("S", "ownership", "low", "所有者確認がまだです", fix=ownership.instructions("shop.example"),
+            key="ownership:unverified"),
+]
+
+JARGON = ["nginx", "certbot", "VPS", "SSH", "sudo", "xmlrpc", "REST", "API", "SPF", "DMARC", "CSP",
+          "HTTPS", "SSL", "critical", "high", "medium", "low", "`", "レコード", "ヘッダー"]
+
+
+def test_every_kind_has_its_own_plain_explanation():
+    for f in ALL_KINDS:
+        p = ex.explain(f)
+        assert p.headline != f.title, f"{f.key} falls back to the technical title"
+        assert p.what and p.risk and p.todo, f.key
+
+
+def test_owner_facing_text_has_no_jargon():
+    for f in ALL_KINDS:
+        p = ex.explain(f)
+        texts = [p.headline, p.what, p.risk] + [t for t in p.todo if t != f.fix]
+        for t in texts:
+            for word in JARGON:
+                hit = re.search(rf"(?<![A-Za-z]){re.escape(word)}(?![A-Za-z])", t) if word.isascii() else word in t
+                assert not hit, f"{f.key}: '{word}' in owner text: {t}"
+
+
+def test_urgent_items_say_what_happens_if_ignored():
+    for f in ALL_KINDS:
+        p = ex.explain(f)
+        if p.level == 0:
+            assert len(p.risk) > 30 and len(p.todo) >= 2, f.key
+
+
+def test_card_skimming_and_hijack_are_top_priority():
+    top = {f.key for f in ALL_KINDS if ex.explain(f).level == 0}
+    assert {"scripts:diff:/checkout/:ab", "dns:A:1.2.3.4", "dns:NS:ns.example.",
+            "wordpress:exposed:/.env", "tls:expired"} <= top
+
+
+def test_issue_keeps_technical_part_for_forwarding():
+    from site_guard.github_issues import issue_body
+    f = Finding("S", "mail", "high", "SPFレコードがありません", fix="v=spf1 -all", key="mail:spf")
+    body = issue_body(f, "o")
+    assert "制作会社・技術者の方へ" in body and "v=spf1 -all" in body and "放っておくと" in body

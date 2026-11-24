@@ -16,7 +16,7 @@ import sys
 from . import github_issues
 from . import state as state_store
 from .config import load_settings
-from .models import SEVERITY_EMOJI
+from .explain import explain
 from .notify import send_discord, send_resolved, send_status_report, status_report
 from .runner import run_site
 
@@ -78,7 +78,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n== {site.name} ({site.base_url}) — 検出 {len(findings)} 件 / 新規 {len(new)} 件")
         for f in findings:
             mark = "NEW " if f in new else ("ACK " if f.acknowledged else "    ")
-            print(f"{mark}{SEVERITY_EMOJI.get(f.severity, '')} [{f.severity}] {f.title}")
+            p = explain(f)
+            print(f"{mark}{p.icon} {p.label}：{p.headline}")
         for title in resolved:
             print(f"DONE ✅ {title}")
         if args.command == "accept":

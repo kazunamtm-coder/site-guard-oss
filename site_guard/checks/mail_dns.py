@@ -118,7 +118,7 @@ def check(site: Site) -> tuple[list[Finding], dict[str, list[str]]]:
         for rtype in ("A", "AAAA", "MX"):
             snapshot[rtype] = records(d, rtype, auth)
     except dns.exception.DNSException as e:
-        findings.append(Finding(site.name, "mail", "medium", "DNSを照会できませんでした", str(e)))
+        findings.append(Finding(site.name, "mail", "medium", "DNSを照会できませんでした", str(e), key="dns:lookup-failed"))
     return findings, snapshot
 
 

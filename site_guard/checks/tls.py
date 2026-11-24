@@ -25,14 +25,16 @@ def check(site: Site, warn_days: int) -> list[Finding]:
         days = cert_days_left(site.domain)
     except ssl.SSLCertVerificationError as e:
         return [Finding(site.name, "tls", "critical", "SSL証明書の検証に失敗しました", str(e),
-                        "証明書が失効・不一致です。certbot の状態を確認してください。")]
+                        "証明書が失効・不一致です。サーバーの証明書の自動更新（certbot 等）の状態を確認してください。",
+                        key="tls:verify-failed")]
     except OSError as e:
-        return [Finding(site.name, "tls", "high", "HTTPS(443)に接続できません", str(e))]
+        return [Finding(site.name, "tls", "high", "HTTPS(443)に接続できません", str(e), key="tls:unreachable")]
     if days < 0:
-        return [Finding(site.name, "tls", "critical", "SSL証明書の期限が切れています")]
+        return [Finding(site.name, "tls", "critical", "SSL証明書の期限が切れています",
+                        fix="証明書を更新してください（certbot 等の自動更新の状態を確認）。", key="tls:expired")]
     if days <= warn_days:
         return [Finding(site.name, "tls", "high" if days <= 7 else "medium",
                         f"SSL証明書の期限まで残り{days}日",
-                        fix="VPSで `sudo certbot renew --dry-run` を実行し、自動更新が動くか確認してください。",
+                        fix="証明書の自動更新が動いているか確認してください（例: `sudo certbot renew --dry-run`）。",
                         key="tls:expiring")]
     return []

@@ -16,6 +16,7 @@ from .checks import mail_dns, tls, wordpress
 from .checks.scripts import parse_scripts
 from .config import Settings, Site
 from .models import SEVERITY_ORDER, Finding
+from .explain import explain, tech_block
 from .ownership import instructions, is_verified
 from .platform import detect, is_self_hosted
 
@@ -47,7 +48,7 @@ def run(url: str, settings: Settings) -> Diagnosis:
         r = session.get(base, timeout=30)
         html, headers = r.text, {k.lower(): v for k, v in r.headers.items()}
     except requests.RequestException as e:
-        findings = [Finding(domain, "http", "high", "サイトに接続できません", str(e))]
+        findings = [Finding(domain, "http", "high", "サイトに接続できません", str(e), key="http:unreachable")]
         return Diagnosis(url, domain, [], None, verified, note, [], findings)
 
     platforms = detect(html, headers)
@@ -67,46 +68,61 @@ def run(url: str, settings: Settings) -> Diagnosis:
         if missing:
             findings.append(Finding(domain, "headers", "low" if len(missing) < 3 else "medium",
                                     f"セキュリティヘッダー不足: {len(missing)}件", "\n".join(f"- {m}" for m in missing),
-                                    "ホスティング側の設定で追加できるか確認してください。"))
+                                    "ホスティング側の設定で追加できるか確認してください。",
+                                    key="headers:missing"))
     findings.sort(key=lambda f: SEVERITY_ORDER.get(f.severity, 9))
     return Diagnosis(url, domain, platforms, is_self_hosted(platforms), verified, note, third, findings)
 
 
 RESPONSIBILITY = {
-    True: "サーバーは運営者自身の管理です。本体・プラグインの更新や改ざん対策は運営者（または制作会社）の責任範囲です。",
-    False: "サーバーはプラットフォーム側が管理しています。運営者の責任範囲は主に、メール認証・追加アプリやタグ・管理アカウントの保護です。",
-    None: "プラットフォームを特定できませんでした。",
+    True: "ホームページを置いている場所（サーバー）は、お店が自分で管理しています。"
+          "ソフトの更新や、悪いプログラムを仕込まれないための対策は、お店（または制作会社）の仕事です。",
+    False: "ホームページを置いている場所は、サービスの会社が管理しています。"
+           "お店がやることは、主に「にせのメール対策」「追加したアプリやタグの管理」「ログインの守り」です。",
+    None: "ホームページを作っているサービスを、特定できませんでした。",
 }
 
 
 def to_text(d: Diagnosis) -> str:
-    action = [f for f in d.findings if f.severity != "info"]
-    worst = min((SEVERITY_ORDER.get(f.severity, 9) for f in action), default=9)
-    light = {0: "🔴", 1: "🔴", 2: "🟠", 3: "🟡"}.get(worst, "🟢")
-    verdict = (f"{light} 対応をおすすめする項目が {len(action)} 件あります" if action
-               else "🟢 外から確認できる範囲では問題は見つかりませんでした")
+    todo = [f for f in d.findings if f.severity != "info"]
+    todo.sort(key=lambda f: (explain(f).level, SEVERITY_ORDER.get(f.severity, 9)))
+    urgent = [f for f in todo if explain(f).level <= 2]
+    if urgent:
+        rest = len(todo) - len(urgent)
+        verdict = (f"{explain(urgent[0]).icon} 直したほうがよいことが {len(urgent)} 件あります。上から順に対応してください。"
+                   + (f"（ほかに、急ぎではないことが {rest} 件あります）" if rest else ""))
+    elif todo:
+        verdict = "🟢 急いで直すことはありません。時間があるときに見直せることが、いくつかあります。"
+    else:
+        verdict = "🟢 外から確認できる範囲では、問題は見つかりませんでした。"
     lines = [
         f"# {d.domain} の診断結果",
         "",
         verdict,
         "",
-        f"- プラットフォーム: {', '.join(d.platforms) or '不明'}",
-        f"- 責任範囲: {RESPONSIBILITY[d.self_hosted]}",
-        f"- 点検の深さ: {d.verified_note}",
-        f"- 外部から読み込んでいるスクリプト: {', '.join(d.third_party) or 'なし'}",
+        f"- 使っているサービス：{', '.join(d.platforms) or '不明'}",
+        f"- だれが守る？：{RESPONSIBILITY[d.self_hosted]}",
+        f"- 点検したはんい：{'くわしい点検まで（持ち主の確認ずみ）' if d.verified else 'だれでも見られる範囲だけ'}",
         "",
     ]
-    for f in d.findings:
-        lines.append(f"## {f.title}（{f.severity}）")
-        if f.detail:
-            lines.append(f.detail)
-        if f.fix:
-            lines.append(f"→ {f.fix}")
+    for i, f in enumerate(todo, 1):
+        p = explain(f)
+        lines += [f"## {i}. {p.icon} {p.label}：{p.headline}", "",
+                  f"**何が起きているか**：{p.what}", "",
+                  f"**放っておくと**：{p.risk}", "",
+                  "**あなたがやること**"]
+        lines += [f"{j}. {t}" for j, t in enumerate(p.todo, 1)]
         lines.append("")
+    if todo:
+        lines += ["---", "## 制作会社・技術者の方へ", "",
+                  f"外部スクリプト: {', '.join(d.third_party) or 'なし'}", ""]
+        for i, f in enumerate(todo, 1):
+            lines += [f"{i}. " + tech_block(f).replace("\n", "\n   "), ""]
     if not d.verified:
         lines += [
             "---",
-            "より詳しい点検（流出ファイル・管理画面の露出など）には、ドメイン所有者の確認が必要です。",
+            "## もっとくわしく点検するには",
+            "支払いページの中や、見られてはいけないファイルがないかまで調べるには、お店の「持ち主の確認」が必要です。",
             instructions(d.domain),
         ]
     return "\n".join(lines)
