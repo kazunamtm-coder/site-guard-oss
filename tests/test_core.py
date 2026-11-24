@@ -226,8 +226,9 @@ def test_placeholder_config_is_refused(tmp_path):
     from site_guard.config import load_settings
     cfg = tmp_path / "sites.toml"
     cfg.write_text('[[site]]\nname = "x"\nbase_url = "https://example.com"\n')
-    with pytest.raises(SystemExit):
+    with pytest.raises(SystemExit) as e:
         load_settings(cfg)
+    assert e.value.code == 2  # 1 would show as a green run in Actions
 
 
 # --- GitHub Issue notifications -------------------------------------------

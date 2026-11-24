@@ -7,7 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "run / all / accept / test-notify"
+        description: "実行する内容（test-notify = テスト通知）"
+        type: choice
+        options: [run, test-notify, all, accept]
         default: run
 
 permissions:

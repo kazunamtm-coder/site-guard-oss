@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -59,8 +60,12 @@ def load_settings(path: Path | None = None, require_sites: bool = True) -> Setti
         sites = [s for s in sites if s.domain not in ("example.com", "www.example.com")]
     placeholders = [s.name for s in sites if s.domain in ("example.com", "www.example.com")]
     if placeholders and require_sites:
-        raise SystemExit("config/sites.toml の base_url が example.com のままです。"
-                         "自分のサイトのURLに書き換えてください。")
+        # Exit code 2 (not 1): the workflow treats 1 as "critical finding, already
+        # notified" and shows success. A broken setup must show as a failed run,
+        # so GitHub emails the owner.
+        print("config/sites.toml の base_url が example.com のままです。"
+              "自分のサイトのURLに書き換えてください。", file=sys.stderr)
+        raise SystemExit(2)
     general = raw.get("general", {})
     return Settings(
         sites=sites,
