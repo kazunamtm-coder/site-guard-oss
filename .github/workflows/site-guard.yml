@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write  # commit the baseline state back to this repo
+  issues: write    # notify through GitHub Issues (GitHub emails the owner)
 
 concurrency:
   group: site-guard
@@ -22,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
+      GITHUB_TOKEN: ${{ github.token }}
       DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
     steps:
       # The baseline committed below lists your server IP and open weaknesses.
